@@ -41,18 +41,23 @@ sys_wait(void)
 uint64
 sys_sbrk(void)
 {
-  int addr;
   int n;
   struct proc *p = myproc();
   if(argint(0, &n) < 0)
     return -1;
-  // printf("sbrk: %d\n",n);
-  addr = p->sz;
-  // lazy allocation
-  if(n < 0) {
-    uvmdealloc(p->pagetable, p->sz, p->sz+n); // dealloc immediately
+
+  uint64 addr = p->sz;
+  if(n < 0){
+    uint64 shrink = (uint64)(-(long)n);
+    if(shrink > p->sz)
+      return -1;
+    p->sz = uvmdealloc(p->pagetable, p->sz, p->sz - shrink);
+  } else {
+    uint64 newsz = p->sz + (uint64)n;
+    if(newsz < p->sz || newsz >= MAXVA)
+      return -1;
+    p->sz = newsz;
   }
-  p->sz += n;
   return addr;
 }
 

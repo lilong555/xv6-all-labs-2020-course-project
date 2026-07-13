@@ -69,8 +69,9 @@ usertrap(void)
     // ok
   } else {
     uint64 va = r_stval();
-    if((r_scause() == 13 || r_scause() == 15) && uvmshouldtouch(va)){
-      uvmlazytouch(va); // lazy page allocation
+    if((r_scause() == 13 || r_scause() == 15) &&
+       uvmlazyalloc(p->pagetable, va) == 0){
+      // A valid lazy page has been installed; retry the faulting instruction.
     } else {
       printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
       printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -222,4 +223,3 @@ devintr()
     return 0;
   }
 }
-

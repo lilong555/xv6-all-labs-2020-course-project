@@ -360,14 +360,14 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
 
-  if(uvmshouldtouch(dstva))
-    uvmlazytouch(dstva);
-
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0){
+      if(uvmlazyalloc(pagetable, va0) < 0 ||
+         (pa0 = walkaddr(pagetable, va0)) == 0)
+        return -1;
+    }
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -388,14 +388,14 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
 
-  if(uvmshouldtouch(srcva))
-    uvmlazytouch(srcva);
-
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0){
+      if(uvmlazyalloc(pagetable, va0) < 0 ||
+         (pa0 = walkaddr(pagetable, va0)) == 0)
+        return -1;
+    }
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -421,8 +421,11 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   while(got_null == 0 && max > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0){
+      if(uvmlazyalloc(pagetable, va0) < 0 ||
+         (pa0 = walkaddr(pagetable, va0)) == 0)
+        return -1;
+    }
     n = PGSIZE - (srcva - va0);
     if(n > max)
       n = max;
@@ -479,31 +482,32 @@ int vmprint(pagetable_t pagetable) {
   return pgtblprint(pagetable, 0);
 }
 
-// touch a lazy-allocated page so it's mapped to an actual physical page.
-void uvmlazytouch(uint64 va) {
+// Allocate one missing page in the current process's lazy heap.
+int
+uvmlazyalloc(pagetable_t pagetable, uint64 va)
+{
   struct proc *p = myproc();
-  char *mem = kalloc();
-  if(mem == 0) {
-    // failed to allocate physical memory
-    printf("lazy alloc: out of memory\n");
-    p->killed = 1;
-  } else {
-    memset(mem, 0, PGSIZE);
-    if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
-      printf("lazy alloc: failed to map page\n");
-      kfree(mem);
-      p->killed = 1;
-    }
-  }
-  // printf("lazy alloc: %p, p->sz: %p\n", PGROUNDDOWN(va), p->sz);
-}
-
-// whether a page is previously lazy-allocated and needed to be touched before use.
-int uvmshouldtouch(uint64 va) {
   pte_t *pte;
-  struct proc *p = myproc();
-  
-  return va < p->sz // within size of memory for the process
-    && PGROUNDDOWN(va) != r_sp() // not accessing stack guard page (it shouldn't be mapped)
-    && (((pte = walk(p->pagetable, va, 0))==0) || ((*pte & PTE_V)==0)); // page table entry does not exist
+
+  if(p == 0 || pagetable != p->pagetable)
+    return -1;
+
+  va = PGROUNDDOWN(va);
+  if(va >= p->sz || va < PGROUNDDOWN(p->trapframe->sp))
+    return -1;
+
+  pte = walk(pagetable, va, 0);
+  if(pte != 0 && (*pte & PTE_V) != 0)
+    return 0;
+
+  char *mem = kalloc();
+  if(mem == 0)
+    return -1;
+  memset(mem, 0, PGSIZE);
+  if(mappages(pagetable, va, PGSIZE, (uint64)mem,
+              PTE_R | PTE_W | PTE_U) != 0){
+    kfree(mem);
+    return -1;
+  }
+  return 0;
 }
