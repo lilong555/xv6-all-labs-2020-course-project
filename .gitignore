@@ -15,3 +15,8 @@ mkfs
 kernel/kernel
 user/usys.S
 .gdbinit
+tmp/
+.worktrees/
+artifacts/grades/*.log
+__pycache__/
+*.pyc
