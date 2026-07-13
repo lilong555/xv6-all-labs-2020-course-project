@@ -69,7 +69,7 @@ OBJDUMP = $(TOOLPREFIX)objdump
 
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb
 # GCC 12+ diagnoses xv6's deliberately non-returning recursive shell executor.
-CFLAGS += -Wno-error=infinite-recursion
+CFLAGS += $(shell $(CC) -Werror -Wno-error=infinite-recursion -E -x c /dev/null >/dev/null 2>&1 && echo -Wno-error=infinite-recursion)
 
 ifdef LAB
 LABUPPER = $(shell echo $(LAB) | tr a-z A-Z)
