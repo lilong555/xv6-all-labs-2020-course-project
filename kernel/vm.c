@@ -338,12 +338,14 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       goto err;
     }
     // for any cases above, we created a new reference to the physical
-    // page, so increase reference count by one.
-    krefpage((void*)pa);
-  }
-  return 0;
+      // page, so increase reference count by one.
+      krefpage((void*)pa);
+    }
+    sfence_vma();
+    return 0;
 
  err:
+  sfence_vma();
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
@@ -370,9 +372,10 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   uint64 n, va0, pa0;
 
   while(len > 0){
-    if(uvmcheckcowpage(dstva))
-      uvmcowcopy(dstva);
     va0 = PGROUNDDOWN(dstva);
+    if(uvmcheckcowpage(pagetable, va0) &&
+       uvmcowcopy(pagetable, va0) < 0)
+      return -1;
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
@@ -456,37 +459,45 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
  
-// Check if a given virtual address points to a copy-on-write page
-int uvmcheckcowpage(uint64 va) {
+// Check if a given virtual address points to a copy-on-write page.
+int
+uvmcheckcowpage(pagetable_t pagetable, uint64 va)
+{
   pte_t *pte;
-  struct proc *p = myproc();
-  
-  return va < p->sz // within size of memory for the process
-    && ((pte = walk(p->pagetable, va, 0))!=0)
-    && (*pte & PTE_V) // page table entry exists
-    && (*pte & PTE_COW); // page is a cow page
+
+  if(va >= MAXVA || (pte = walk(pagetable, va, 0)) == 0)
+    return 0;
+  return (*pte & (PTE_V | PTE_U | PTE_COW)) ==
+         (PTE_V | PTE_U | PTE_COW);
 }
 
-// Copy the cow page, then map it as writable
-int uvmcowcopy(uint64 va) {
+// Make one COW mapping private and writable.
+int
+uvmcowcopy(pagetable_t pagetable, uint64 va)
+{
   pte_t *pte;
-  struct proc *p = myproc();
 
-  if((pte = walk(p->pagetable, va, 0)) == 0)
-    panic("uvmcowcopy: walk");
-  
-  // copy the cow page
-  // (no copying will take place if reference count is already 1)
-  uint64 pa = PTE2PA(*pte);
-  uint64 new = (uint64)kcopy_n_deref((void*)pa);
-  if(new == 0)
+  va = PGROUNDDOWN(va);
+  if((pte = walk(pagetable, va, 0)) == 0 ||
+     (*pte & (PTE_V | PTE_U | PTE_COW)) !=
+     (PTE_V | PTE_U | PTE_COW))
     return -1;
-  
-  // map as writable, remove the cow flag
+
+  uint64 pa = PTE2PA(*pte);
   uint64 flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
-  uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 0);
-  if(mappages(p->pagetable, va, 1, new, flags) == -1) {
-    panic("uvmcowcopy: mappages");
+
+  if(kgetref((void*)pa) == 1){
+    *pte = PA2PTE(pa) | flags;
+    sfence_vma();
+    return 0;
   }
+
+  char *mem = kalloc();
+  if(mem == 0)
+    return -1;
+  memmove(mem, (void*)pa, PGSIZE);
+  *pte = PA2PTE((uint64)mem) | flags;
+  sfence_vma();
+  kfree((void*)pa);
   return 0;
 }

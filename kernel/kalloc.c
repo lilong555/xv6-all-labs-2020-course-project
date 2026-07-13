@@ -50,8 +50,12 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE){
+    acquire(&pgreflock);
+    PA2PGREF(p) = 1;
+    release(&pgreflock);
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -67,21 +71,20 @@ kfree(void *pa)
     panic("kfree");
 
   acquire(&pgreflock);
-  if(--PA2PGREF(pa) <= 0) {
-    // when the reference count of the page goes to zero, free the page
-
-    // Fill with junk to catch dangling refs.
-    // pa will be memset multiple times if race-condition occurred.
-    memset(pa, 1, PGSIZE);
-
-    r = (struct run*)pa;
-
-    acquire(&kmem.lock);
-    r->next = kmem.freelist;
-    kmem.freelist = r;
-    release(&kmem.lock);
-  }
+  if(PA2PGREF(pa) < 1)
+    panic("kfree ref");
+  int refs = --PA2PGREF(pa);
   release(&pgreflock);
+
+  if(refs > 0)
+    return;
+
+  memset(pa, 1, PGSIZE);
+  r = (struct run*)pa;
+  acquire(&kmem.lock);
+  r->next = kmem.freelist;
+  kmem.freelist = r;
+  release(&kmem.lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -100,42 +103,29 @@ kalloc(void)
 
   if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
-    // reference count for a physical page is always 1 after allocation.
-    // (no need to lock this operation)
+    acquire(&pgreflock);
     PA2PGREF(r) = 1;
+    release(&pgreflock);
   }
   
   return (void*)r;
 }
-// Decrease reference to the page by one if it's more than one, then
-// allocate a new physical page and copy the page into it.
-// (Effectively turing one reference into one copy.)
-// 
-// Do nothing and simply return pa when reference count is already
-// less than or equal to 1.
-void *kcopy_n_deref(void *pa) {
+int
+kgetref(void *pa)
+{
   acquire(&pgreflock);
-
-  if(PA2PGREF(pa) <= 1) {
-    release(&pgreflock);
-    return pa;
-  }
-
-  uint64 newpa = (uint64)kalloc();
-  if(newpa == 0) {
-    release(&pgreflock);
-    return 0; // out of memory
-  }
-  memmove((void*)newpa, (void*)pa, PGSIZE);
-  PA2PGREF(pa)--;
-
+  int refs = PA2PGREF(pa);
   release(&pgreflock);
-  return (void*)newpa;
+  return refs;
 }
 
 // increase reference count of the page by one
-void krefpage(void *pa) {
+void
+krefpage(void *pa)
+{
   acquire(&pgreflock);
+  if(PA2PGREF(pa) < 1)
+    panic("krefpage");
   PA2PGREF(pa)++;
   release(&pgreflock);
 }
