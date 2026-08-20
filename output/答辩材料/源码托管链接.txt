@@ -1,7 +1,8 @@
 项目名称：MIT 6.S081 2020 xv6 全部 Labs 课程设计
-组号：1 组
+组号：79 组
 组长：李胤龙
 学号：2453195
+选课课号：42028704
 
 GitHub 源码托管地址：
 https://github.com/lilong555/xv6-all-labs-2020-course-project
