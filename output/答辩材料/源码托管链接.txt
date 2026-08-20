@@ -1,0 +1,14 @@
+项目名称：MIT 6.S081 2020 xv6 全部 Labs 课程设计
+组号：1 组
+组长：李胤龙
+学号：2453195
+
+GitHub 源码托管地址：
+https://github.com/lilong555/xv6-all-labs-2020-course-project
+
+阅读入口：course-project 分支的 README.md
+实验源码：util、syscall、pgtbl、traps、lazy、cow、thread、lock、fs、mmap、net 分支
+官方评分：985/985，详见 course-project 分支 docs/评分结果.md
+
+说明：按照课程要求，本压缩包不包含源码包。完整源码、Git 历史及各实验分支均通过
+上述仓库链接提供。
